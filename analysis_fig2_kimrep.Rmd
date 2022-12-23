@@ -1,0 +1,325 @@
+---
+title: "analysis_fig_kimrep"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(dplyr)
+library(plyr)
+library(ggplot2)
+library(cowplot)
+library(ggpubr)
+library(rstatix)
+library(effsize)
+```
+
+```{r}
+# User-specific TODO
+setwd('C:/Users/olivia/Documents/GitHub/TaskSuccessRewardImplicitAdapt') # TODO: go to appropriate working directory
+```
+
+```{r}
+# custom functions
+
+# dupe MATLAB's smooth function with window = 5
+smooth <- function(y ){
+  h <- c(head(y, 1), mean(head(y, 3), na.rm=T))
+  t <- c(mean(tail(y, 3), na.rm=T), tail(y, 1))
+  m <- c()
+  for (i in 3:(length(y)-2)) {
+    m <- c(m, mean(y[i-2:i+2], na.rm=T))
+  }
+  c(h, m, t)
+}
+
+unpairedTAndCohensD <- function(dataA, dataB) {
+  testout = t.test(dataA, dataB, paired = FALSE, var.equal=TRUE) # use Student's t-test
+  t = testout$statistic
+  df = testout$parameter
+  p = testout$p.value
+  
+  testout = cohen.d(dataA, dataB, paired = FALSE)
+  d = testout$estimate
+  return(c(t, df, p, d))
+}
+
+```
+
+
+```{r}
+# load data
+kr = read.csv("data_fig2_kimrep.csv")
+kr$target = as.factor(kr$targAngle)
+kr$sub = as.factor(kr$subject)
+kr$reachAngle = kr$maxvelAngle #comment this line out if you want to consider reach angle at the target distance instead of at max velocity
+```
+
+```{r}
+# initial preprocessing -- remove outliers, baseline subtraction according to strategy in Kim et al., 2019 elife
+
+# find and remove outliers
+targAngles = unique(kr$target)
+numBadTrials = vector()
+tgt_SDs = data.frame(matrix(NA, length(unique(kr$sub)), length(targAngles)))
+badTrialRows = c() # need to keep list of bad trials for later
+for (s in unique(kr$sub)) {
+  badTrialCounter = 0
+  t = 0
+  for(targ in targAngles){
+    t = t+1
+    thisdata = subset(kr, sub==s & target==targ)
+    smoothed_hand = smooth(thisdata$reachAngle)
+    detrended = thisdata$reachAngle - smoothed_hand
+    tgt_SDs[s,t] = sd(detrended, na.rm = T)
+    for (i in 1:length(detrended)) {
+      if (!is.na(thisdata$reachAngle[i])) {
+        if ((abs(detrended[i]) > 3*tgt_SDs[s,t]) | (abs(thisdata$reachAngle[i]) > 90)) {
+          badTrialRows = c(badTrialRows, rownames(thisdata)[i]) # log original df index for later
+          badTrialCounter = badTrialCounter + 1 # update bad trial counter
+        }
+      }
+    }
+  }
+  numBadTrials[s] = badTrialCounter
+}
+kr$reachAngle_raw = kr$reachAngle # preserve raw reach angles
+for (val in badTrialRows) {
+  kr$reachAngle[as.numeric(val)] = NA # replace excluded values with NA
+}
+
+kr.base = subset(kr, trialNum > 40 & trialNum<120) # baseline trials with feedback
+
+#subtract baseline biases for each participant (targetwise)
+targAngles = unique(kr$target)
+for(targ in targAngles){
+  kr_targ.base = subset(kr.base, targAngle == targ)
+  kr.sub_targ_bias = tapply(kr_targ.base$reachAngle, kr_targ.base$sub, mean, na.rm = T)
+  
+  for(s in unique(kr$subject)){
+    kr$reachAngle[kr$subject == s & kr$targAngle == targ] = kr$reachAngle[kr$subject == s & kr$targAngle == targ] - kr.sub_targ_bias[s]
+  }
+}
+
+```
+
+```{r}
+# subset data
+kr$bin = as.factor(kr$bin)
+miss = subset(kr, condition == 1)
+hit = subset(kr, condition == 2)
+```
+
+```{r}
+#binned learning curve
+binSubjectData <- function(dfin){
+  sub = c()
+  bin = c()
+  reachAngle = c()
+  for (s in unique(dfin$sub)){
+    tempdata = subset(dfin, sub==s)
+    binneddata = tapply(tempdata$reachAngle, tempdata$bin, mean, na.rm=T)
+    for (b in 1:length(binneddata)) {
+      sub = c(sub, s)
+      bin = c(bin, as.numeric(rownames(binneddata)[b]))
+      reachAngle = c(reachAngle, binneddata[b])
+    }
+  }
+  subjectwiseBins = data.frame(sub, bin, reachAngle)
+  return(subjectwiseBins)
+}
+
+miss_binned = binSubjectData(miss)
+miss_bin_lc = tapply(miss_binned$reachAngle, miss_binned$bin, mean, na.rm = T)
+miss_bin_lc_ci = tapply(miss_binned$reachAngle, miss_binned$bin, sd, na.rm = T) /sqrt(length(unique(miss_binned$sub)))
+
+hit_binned = binSubjectData(hit)
+hit_bin_lc = tapply(hit_binned$reachAngle, hit_binned$bin, mean, na.rm = T)
+hit_bin_lc_ci = tapply(hit_binned$reachAngle, hit_binned$bin, sd, na.rm = T) /sqrt(length(unique(hit_binned$sub)))
+
+
+theme_set(theme_cowplot())
+custom_palette = c("#1F78B4", "#E31A1C")
+
+
+binned_lcs = data.frame(
+  condition = factor(c(rep("Miss", 110), rep("Hit", 110))),
+  trial = c(1:110-0.6, 1:110-0.3),
+  epAngle = c(miss_bin_lc, hit_bin_lc),
+  sd = c(miss_bin_lc_ci, hit_bin_lc_ci)
+)
+binned_lcs$condition = factor(binned_lcs$condition, levels=c("Miss", "Hit"))
+
+plot_lcs = ggplot(data = binned_lcs, aes(x = trial, y=epAngle, group=condition, color= condition)) + 
+  geom_point() + 
+  geom_vline(xintercept = 15.5, linetype = "dashed") + 
+  geom_vline(xintercept = 95.5, linetype = "dashed") + 
+  geom_ribbon(aes(x = trial, ymin = epAngle - sd, ymax = epAngle + sd, fill = condition), inherit.aes = F)+
+  scale_color_manual(values = custom_palette) +
+  scale_fill_manual(values = custom_palette) +
+  ylab("Hand Angle \n(degrees)") +
+  xlab("Cycle (8 trials)")
+plot_lcs
+
+# save data that went into the figure
+learningCurveDF = data.frame(miss_bin_lc, miss_bin_lc_ci,
+                             hit_bin_lc, hit_bin_lc_ci)
+write.csv(learningCurveDF,"output_fig2PanelA_binnedLC_meanSEM.csv", row.names = FALSE)
+```
+
+
+```{r}
+## early learning rates
+getEarlyLR <- function(dfin) {
+  # this approach is what Kim et al., 2019 did
+  output = vector()
+  for (s in unique(dfin$sub)) {
+    tempvals = subset(dfin[dfin$sub==s,], bin < 23 & bin > 17)
+    lastbin = tapply(tempvals$reachAngle, tempvals$bin, mean, na.rm = T)
+    output[s] = mean(lastbin)/5
+  }
+  return(output)
+}
+
+miss_early_lr = getEarlyLR(miss_binned)
+hit_early_lr = getEarlyLR(hit_binned)
+# arrange into dataframe for 2 way ANOVA
+sub = 1:48
+targetSize = c(rep("Small", 24), rep("Big", 24))
+earlyLR = c(miss_early_lr, hit_early_lr)
+earlyLRDF = data.frame(sub, targetSize, earlyLR)
+earlyLRDF$targetSize = as.factor(earlyLRDF$targetSize)
+# ggboxplot(earlyLRDF, x = "targetSize", y = "earlyLR") # boxplot early learning rate ("earlyLR") by task success groups ("targetSize").
+earlyLR.aov <- anova_test(
+  data = earlyLRDF,
+  formula = earlyLR ~ targetSize,
+  dv = earlyLR)
+get_anova_table(earlyLR.aov) # stlRwdTS.aov2Way$ges[1]
+unpairedTAndCohensD(earlyLRDF$earlyLR[earlyLRDF$targetSize == 'Small'],
+                               earlyLRDF$earlyLR[earlyLRDF$targetSize == 'Big']) # returns t, df, p, and cohen's d
+
+early_lr = data.frame(
+  condition = c(rep("Miss", 24), rep("Hit", 24)),
+  lr = c(as.numeric(miss_early_lr), as.numeric(hit_early_lr))
+)
+early_lr_smry = ddply(early_lr, .(condition), summarise,
+                      early_mean = mean(lr, na.rm = T),
+                      early_se = sd(lr, na.rm = T)/sqrt(24))
+early_lr_smry$condition = factor(early_lr_smry$condition, levels=c("Miss", "Hit"))
+
+plot_lr = ggplot() +  geom_point(data=early_lr_smry, aes(y=early_mean, x=condition, color = condition), size = 3) + geom_errorbar(data=early_lr_smry, aes(y=early_mean, x=condition, ymin = early_mean - early_se,ymax = early_mean + early_se, color = condition), size = 1,  width = 0) + #geom_boxplot(data=early_lr, aes(y=lr, x=condition, color = condition), outlier.shape=NA) +
+  scale_color_manual(values = custom_palette) +
+  scale_fill_manual(values = custom_palette) +
+  ylab("Learning Rate \n(degrees/bin)") +
+  xlab("Condition") +
+  ylim(1, 2)+
+  theme(legend.position="none")
+
+plot_lr
+
+write.csv(early_lr_smry,"output_fig2PanelB_earlyLR_meanSEM.csv", row.names = TRUE)
+```
+
+```{r}
+
+##late asymptotes (clamp 1)
+miss.late1 = subset(miss_binned, bin>85 & bin<96)
+hit.late1 = subset(hit_binned, bin>85 & bin<96)
+miss_late1_asym = tapply(miss.late1$reachAngle, miss.late1$sub, mean, na.rm = T)
+hit_late1_asym = tapply(hit.late1$reachAngle, hit.late1$sub, mean, na.rm = T)
+
+# arrange into dataframe for 2 way ANOVA
+sub = 1:48
+targetSize = c(rep("Small", 24), rep("Big", 24))
+asym1 = c(miss_late1_asym, hit_late1_asym)
+asym1DF = data.frame(sub, targetSize, asym1)
+asym1DF$targetSize = as.factor(asym1DF$targetSize)
+# ggboxplot(asym1DF, x = "targetSize", y = "asym1") # boxplot initial asymptote ("asym1") by task success groups ("targetSize"). color box plots by the second grouping factor of the reward available ("rewardAvailable")
+asym1.aov <- anova_test(
+  data = asym1DF,
+  formula = asym1 ~ targetSize,
+  dv = asym1)
+get_anova_table(asym1.aov) # stlRwdTS.aov2Way$ges[1]
+unpairedTAndCohensD(asym1DF$asym1[asym1DF$targetSize == 'Small'],
+                               asym1DF$asym1[asym1DF$targetSize == 'Big'])
+
+
+#asym figures
+asymptotes = data.frame(
+  condition = c(rep("Miss", 24), rep("Hit", 24)),
+  asym = c(as.numeric(miss_late1_asym), as.numeric(hit_late1_asym))
+)
+asym_smry = ddply(asymptotes, .(condition), summarise,
+                        asym_mean = mean(asym),
+                        asym_se = sd(asym)/sqrt(24))
+asym_smry$condition = factor(asym_smry$condition, levels=c("Miss", "Hit"))
+
+plot_asym = ggplot() +  geom_point(data=asym_smry, aes(y=asym_mean, x=condition, color = condition), size = 3) +  geom_errorbar(data=asym_smry, aes(y=asym_mean, x=condition, ymin = asym_mean - asym_se,ymax = asym_mean + asym_se, color = condition), size = 1, width = 0) + #  geom_boxplot(data=asymptotes, aes(y=asym, x=condition, color = condition), outlier.shape=NA) +
+  scale_color_manual(values = custom_palette) +
+  scale_fill_manual(values = custom_palette) +
+  ylab("Asymptote \n(degrees)") +
+  xlab("Condition") +
+  ylim(0,22)+
+  theme(legend.position="none")
+plot_asym
+
+write.csv(asym_smry,"output_fig2PanelC_asym1_meanSEM.csv", row.names = TRUE)
+```
+
+```{r}
+#washout
+getPctRet <- function(dfin) {
+  # retention as % retained at end of 5 no-FB cycles
+  wash = subset(dfin, bin == 100)
+  lastcycle = subset(dfin, bin == 95)
+  output = tapply(wash$reachAngle, wash$sub, mean, na.rm = T)/
+    tapply(lastcycle$reachAngle, wash$sub, mean, na.rm = T)
+  return(output)
+}
+
+miss_wash = getPctRet(miss_binned)
+hit_wash = getPctRet(hit_binned)
+# put into DF for ANOVA
+sub = 1:48
+targetSize = c(rep("Small", 24), rep("Big", 24))
+washRet = c(miss_wash, hit_wash)
+washRetDF = data.frame(sub, targetSize, washRet)
+washRetDF$targetSize = as.factor(washRetDF$targetSize)
+# ggboxplot(washRetDF, x = "targetSize", y = "washRet") # boxplot retention ("washRet") by task success groups ("targetSize"). color box plots by the second grouping factor of the reward switch ("rewardSwitch")
+ret.aov <- anova_test(
+  data = washRetDF,
+  formula = washRet ~ targetSize,
+  dv = washRet)
+get_anova_table(ret.aov) # stlRwdTS.aov2Way$ges[1]
+unpairedTAndCohensD(washRetDF$washRet[washRetDF$targetSize == 'Small'],
+                               washRetDF$washRet[washRetDF$targetSize == 'Big'])
+
+
+washout = data.frame(
+  condition = c(rep("Miss", 24), rep("Hit", 24)),
+  wash = c(as.numeric(miss_wash), as.numeric(hit_wash))
+)
+wash_smry = ddply(washout, .(condition), summarise,
+                        wash_mean = mean(wash),
+                        wash_se = sd(wash)/sqrt(24))
+wash_smry$condition = factor(wash_smry$condition, levels=c("Miss", "Hit"))
+
+plot_wash = ggplot() + geom_point(data=wash_smry, aes(y=wash_mean, x=condition, color = condition), size = 3) +geom_errorbar(data=wash_smry, aes(y=wash_mean, x=condition, ymin = wash_mean - wash_se,ymax = wash_mean + wash_se, color = condition), size = 1, width = 0) + #geom_boxplot(data=washout, aes(y=wash, x=condition, color = condition), outlier.shape=NA) +
+  scale_color_manual(values = custom_palette) +
+  scale_fill_manual(values = custom_palette) +
+  ylab("Washout Retention (%)") +
+  xlab("Condition") +
+  ylim(0,1.1)+
+  theme(legend.position="none")
+plot_wash
+
+write.csv(wash_smry,"output_fig2PanelD_wash_meanSEM.csv", row.names = TRUE)
+```
+
+
+```{r}
+ggarrange(plot_lcs,
+          ggarrange(plot_lr, plot_asym, plot_wash, ncol=3, legend=NULL),
+          nrow = 2, common.legend = T)
+```
