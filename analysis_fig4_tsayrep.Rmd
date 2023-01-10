@@ -17,7 +17,7 @@ library(effsize)
 
 ```{r}
 # User-specific TODO
-setwd('C:/Users/olivia/Documents/GitHub/TaskSuccessRewardImplicitAdapt') # TODO: go to appropriate working directory
+setwd('C:/Users/kimol/Documents/GitHub/RewardTaskSuccess') # TODO: go to appropriate working directory
 ```
 
 ```{r}
@@ -74,10 +74,6 @@ kr$reachAngle = as.numeric(kr$HandError)
 
 ```{r}
 # initial preprocessing -- remove outliers, baseline subtraction according to strategy in Kim et al., 2019 elife
-
-
-# remove participant 12 for obviously not reaching to the target
-kr = kr[kr$sub!=12,]
 row.names(kr) <- NULL # reset indices
 
 # find and remove outliers
@@ -184,8 +180,15 @@ for (s in unique(kr$sub)) {
 subjectwise_ignoreClampDir = data.frame(sub, jump, stl)
 
 ```
+
 ```{r}
 # confirm that there is appropriate adaptation
+clamp.aov <- anova_test(
+  data = subjectwise_ignoreJump,
+  dv = stl,
+  wid = sub,
+  within = clamp)
+get_anova_table(clamp.aov)
 pairedTAndCohensD(subset(subjectwise_ignoreJump, clamp==4)$stl, subset(subjectwise_ignoreJump, clamp==-4)$stl)
 
 lrn_smry = ddply(subjectwise_ignoreJump, .(clamp), summarise,
