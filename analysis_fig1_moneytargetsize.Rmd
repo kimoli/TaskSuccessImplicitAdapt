@@ -18,7 +18,7 @@ library(psych)
 
 ```{r}
 # load data
-km = read.csv("C:/Users/olivia/Documents/GitHub/TaskSuccessRewardImplicitAdapt/data_fig1_moneytargetsize.csv") # TODO: update directory so it works with your setup
+km = read.csv("C:/Users/kimol/Documents/GitHub/RewardTaskSuccess/data_fig1_moneytargetsize.csv") # TODO: update directory so it works with your setup
 km$target = as.factor(km$targAngle)
 km$sub = as.factor(km$subject)
 #comment this line if you don't want to use maxvelAngle

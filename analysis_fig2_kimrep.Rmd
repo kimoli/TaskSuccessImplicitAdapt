@@ -17,7 +17,7 @@ library(effsize)
 
 ```{r}
 # User-specific TODO
-setwd('C:/Users/olivia/Documents/GitHub/TaskSuccessRewardImplicitAdapt') # TODO: go to appropriate working directory
+setwd('C:/Users/kimol/Documents/GitHub/RewardTaskSuccess') # TODO: go to appropriate working directory
 ```
 
 ```{r}
@@ -166,6 +166,28 @@ plot_lcs
 learningCurveDF = data.frame(miss_bin_lc, miss_bin_lc_ci,
                              hit_bin_lc, hit_bin_lc_ci)
 write.csv(learningCurveDF,"output_fig2PanelA_binnedLC_meanSEM.csv", row.names = FALSE)
+```
+
+
+```{r}
+## not pre-planned comparisons to check whether there is a significant effect of target size if you...
+# collapse across the whole training session
+miss_meanAdapt = c()
+for (s in unique(miss$sub)) {
+  miss_meanAdapt = c(miss_meanAdapt, mean(miss$reachAngle[as.numeric(miss$bin) > 15 & as.numeric(miss$bin) < 96 & miss$sub == s], na.rm = TRUE))
+}
+
+hit_meanAdapt = c()
+for (s in unique(hit$sub)) {
+  hit_meanAdapt = c(hit_meanAdapt, mean(hit$reachAngle[as.numeric(hit$bin) > 15 & as.numeric(hit$bin) < 96 & hit$sub == s], na.rm = TRUE))
+}
+
+unpairedTAndCohensD(miss_meanAdapt, hit_meanAdapt) # ns output
+
+
+# check the timepoint with the greatest separation between mean adaptation values (cycle 45)
+unpairedTAndCohensD(miss_binned$reachAngle[miss_binned$bin == 45], 
+                    hit_binned$reachAngle[hit_binned$bin == 45]) # ns output
 ```
 
 
