@@ -1,4 +1,4 @@
-# Code and data repository *On the money and right on target: How robust are reward and task success effects on implicit adaptation*
+# Code and data repository for *On the money and right on target: How robust are reward and task success effects on implicit adaptation*
 ## N Al-Fawakhiri, A Ma, JA Taylor, OA Kim
 
 ### How are things organized in this repository?
